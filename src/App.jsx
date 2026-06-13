@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Settings, 
   Plus, 
+  Minus,
   Trash2, 
   Coffee, 
   Train, 
@@ -18,10 +19,12 @@ import {
   AlertCircle,
   CheckCircle2,
   Wallet,
-  Globe
+  Globe,
+  Edit2,
+  Calendar
 } from 'lucide-react';
 
-// 預設匯率 (相對於港幣 HKD，作為內部計算基準)
+// 預設匯率 (相對於港幣 HKD)
 const DEFAULT_RATES = {
   HKD: 1,
   USD: 0.128,
@@ -45,9 +48,10 @@ const CATEGORIES = [
   { id: 'others', name: '其他', icon: MoreHorizontal, color: 'bg-gray-100 text-gray-600', border: 'border-gray-200' },
 ];
 
-const STORAGE_KEY = 'trip_splitter_data_v2';
+const STORAGE_KEY = 'trip_splitter_data_v3';
 
 export default function App() {
+  // === 狀態初始化 ===
   const [tripName, setTripName] = useState('日本關西五日遊');
   const [tripDays, setTripDays] = useState(5);
   const [peopleCount, setPeopleCount] = useState(4);
@@ -59,13 +63,26 @@ export default function App() {
   const [exchangeRates, setExchangeRates] = useState(DEFAULT_RATES);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
 
+  // Modal 與表單狀態
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
+  
+  // 新增/編輯 狀態
   const [amount, setAmount] = useState('');
   const [desc, setDesc] = useState('');
   const [category, setCategory] = useState('dining');
+  const [expenseDay, setExpenseDay] = useState(1); // 新增：第幾天
+  const [editingExpense, setEditingExpense] = useState(null); // 正在編輯的項目
+
   const [importText, setImportText] = useState('');
   const [syncMessage, setSyncMessage] = useState({ type: '', text: '' });
+
+  // 確保選擇的天數不會超過總天數
+  useEffect(() => {
+    if (expenseDay > tripDays) {
+      setExpenseDay(tripDays);
+    }
+  }, [tripDays, expenseDay]);
 
   const convertCurrency = (amount, fromCode, toCode) => {
     if (fromCode === toCode) return amount;
@@ -73,10 +90,12 @@ export default function App() {
     return amountInHKD * exchangeRates[toCode];
   };
 
+  // === 1. 初次載入 ===
   useEffect(() => {
     const loadData = () => {
       try {
-        const savedData = localStorage.getItem(STORAGE_KEY);
+        // 嘗試讀取 v3，如果沒有再讀取舊版 v2
+        let savedData = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('trip_splitter_data_v2');
         if (savedData) {
           const parsedData = JSON.parse(savedData);
           setTripName(parsedData.tripName || '未命名行程');
@@ -89,7 +108,12 @@ export default function App() {
           setExchangeRates(prev => ({ ...prev, ...parsedData.exchangeRates }));
           
           if (Array.isArray(parsedData.expenses)) {
-            setExpenses(parsedData.expenses);
+            // 相容舊資料：如果舊資料沒有 day 屬性，預設為第 1 天
+            const formattedExpenses = parsedData.expenses.map(ex => ({
+              ...ex,
+              day: ex.day || 1
+            }));
+            setExpenses(formattedExpenses);
           }
         }
       } catch (error) {
@@ -101,9 +125,11 @@ export default function App() {
     loadData();
   }, []);
 
+  // === 2. 自動儲存 ===
   useEffect(() => {
     if (isDataLoaded) {
       const dataToSave = {
+        version: '3.0',
         tripName, tripDays, peopleCount, splitCount, viewMode, 
         expenses, baseCurrency, targetCurrency, exchangeRates
       };
@@ -118,6 +144,7 @@ export default function App() {
     }
   }, [syncMessage]);
 
+  // 新增支出
   const handleAddExpense = (e) => {
     e.preventDefault();
     if (!amount || isNaN(amount) || amount <= 0) return;
@@ -128,6 +155,7 @@ export default function App() {
       originalCurrency: baseCurrency,
       desc: desc || CATEGORIES.find(c => c.id === category)?.name || '未命名項目',
       category: category,
+      day: expenseDay,
       timestamp: new Date().toISOString()
     };
 
@@ -136,10 +164,36 @@ export default function App() {
     setDesc('');
   };
 
+  // 刪除支出
   const handleDelete = (id) => {
     setExpenses(expenses.filter(e => e.id !== id));
   };
 
+  // 點擊編輯
+  const handleEditClick = (item) => {
+    setEditingExpense({ ...item });
+  };
+
+  // 儲存編輯
+  const handleSaveEdit = (e) => {
+    e.preventDefault();
+    if (!editingExpense || !editingExpense.originalAmount) return;
+
+    const updatedExpenses = expenses.map(ex => 
+      ex.id === editingExpense.id 
+        ? { 
+            ...editingExpense, 
+            originalAmount: parseFloat(editingExpense.originalAmount),
+            desc: editingExpense.desc || CATEGORIES.find(c => c.id === editingExpense.category)?.name || '未命名項目'
+          } 
+        : ex
+    );
+    
+    setExpenses(updatedExpenses);
+    setEditingExpense(null);
+  };
+
+  // 總計計算
   const totalExpenseInBase = useMemo(() => {
     return expenses.reduce((sum, item) => {
       const convertedAmount = convertCurrency(item.originalAmount, item.originalCurrency, baseCurrency);
@@ -154,9 +208,10 @@ export default function App() {
   const displayTotal = viewMode === 'total' ? totalExpenseInBase : (tripDays > 0 ? totalExpenseInBase / tripDays : 0);
   const displayAverage = viewMode === 'total' ? averageExpenseInBase : (tripDays > 0 ? averageExpenseInBase / tripDays : 0);
 
+  // 匯出 / 匯入
   const generateExportCode = () => {
     const payload = {
-      version: '2.0',
+      version: '3.0',
       tripName, tripDays, peopleCount, splitCount, 
       baseCurrency, exchangeRates, expenses
     };
@@ -187,14 +242,21 @@ export default function App() {
     try {
       const jsonString = decodeURIComponent(atob(importText.trim()));
       const data = JSON.parse(jsonString);
-      if (data && data.version) {
+      if (data) {
         setTripName(data.tripName || '未命名行程');
         setTripDays(data.tripDays || 1);
         setPeopleCount(data.peopleCount || 4);
         setSplitCount(data.splitCount || 2);
         setBaseCurrency(data.baseCurrency || 'HKD');
         if (data.exchangeRates) setExchangeRates(data.exchangeRates);
-        if (data.expenses && Array.isArray(data.expenses)) setExpenses(data.expenses);
+        if (data.expenses && Array.isArray(data.expenses)) {
+            // 處理舊版資料匯入相容
+            const formattedExpenses = data.expenses.map(ex => ({
+              ...ex,
+              day: ex.day || 1
+            }));
+            setExpenses(formattedExpenses);
+        }
         setImportText('');
         setSyncMessage({ type: 'success', text: '成功載入旅伴的行程資料！' });
         setTimeout(() => setIsShareOpen(false), 1500);
@@ -220,6 +282,30 @@ export default function App() {
   const currentSymbol = CURRENCIES.find(c => c.code === baseCurrency)?.symbol || '$';
   const targetSymbol = CURRENCIES.find(c => c.code === targetCurrency)?.symbol || '$';
 
+  // 自訂數字增減器元件
+  const NumberControl = ({ label, value, onChange, min = 1, unit }) => (
+    <div>
+      <label className="block text-xs font-medium text-slate-500 mb-1.5 text-center">{label}</label>
+      <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl overflow-hidden h-[42px]">
+        <button 
+          onClick={() => onChange(Math.max(min, value - 1))}
+          className="h-full px-3 text-teal-600 hover:bg-teal-50 hover:text-teal-700 transition-colors flex items-center justify-center active:bg-teal-100"
+        >
+          <Minus size={16} strokeWidth={3} />
+        </button>
+        <div className="flex-1 text-center font-bold text-slate-700 select-none text-base">
+          {value} <span className="text-xs text-slate-400 font-normal ml-0.5">{unit}</span>
+        </div>
+        <button 
+          onClick={() => onChange(value + 1)}
+          className="h-full px-3 text-teal-600 hover:bg-teal-50 hover:text-teal-700 transition-colors flex items-center justify-center active:bg-teal-100"
+        >
+          <Plus size={16} strokeWidth={3} />
+        </button>
+      </div>
+    </div>
+  );
+
   if (!isDataLoaded) return <div className="min-h-screen bg-slate-50 flex justify-center items-center">載入中...</div>;
 
   return (
@@ -240,9 +326,7 @@ export default function App() {
                 onChange={(e) => setBaseCurrency(e.target.value)}
                 className="bg-transparent text-white font-semibold text-sm border-none focus:ring-0 cursor-pointer appearance-none pr-1 outline-none"
               >
-                {CURRENCIES.map(c => (
-                  <option key={c.code} value={c.code} className="text-slate-800">{c.code}</option>
-                ))}
+                {CURRENCIES.map(c => <option key={c.code} value={c.code} className="text-slate-800">{c.code}</option>)}
               </select>
             </div>
             <button onClick={() => setIsShareOpen(true)} className="p-2 hover:bg-teal-700 rounded-full transition">
@@ -256,6 +340,8 @@ export default function App() {
       </header>
 
       <main className="max-w-md mx-auto p-4 space-y-6">
+        
+        {/* 基本設定卡片 */}
         <section className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
           <div className="mb-5">
             <label className="block text-xs font-medium text-slate-500 mb-1.5">行程名稱</label>
@@ -272,30 +358,13 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1.5">天數</label>
-              <div className="relative">
-                <input type="number" min="1" value={tripDays} onChange={(e) => setTripDays(Math.max(1, parseInt(e.target.value) || 1))} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none text-center" />
-                <span className="absolute right-2 top-2.5 text-slate-400 text-sm">天</span>
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1.5">總人數</label>
-              <div className="relative">
-                <input type="number" min="1" value={peopleCount} onChange={(e) => setPeopleCount(Math.max(1, parseInt(e.target.value) || 1))} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none text-center" />
-                <span className="absolute right-2 top-2.5 text-slate-400 text-sm">人</span>
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1.5">分攤份數</label>
-              <div className="relative">
-                <input type="number" min="1" value={splitCount} onChange={(e) => setSplitCount(Math.max(1, parseInt(e.target.value) || 1))} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 focus:ring-2 focus:ring-teal-500 focus:outline-none text-center" />
-                <span className="absolute right-2 top-2.5 text-slate-400 text-sm">份</span>
-              </div>
-            </div>
+            <NumberControl label="總天數" value={tripDays} onChange={setTripDays} unit="天" />
+            <NumberControl label="總人數" value={peopleCount} onChange={setPeopleCount} unit="人" />
+            <NumberControl label="分攤份數" value={splitCount} onChange={setSplitCount} unit="份" />
           </div>
         </section>
 
+        {/* 總覽與匯率卡片 */}
         <section className="bg-gradient-to-br from-teal-500 to-teal-700 rounded-2xl p-6 shadow-lg text-white relative">
           <div className="flex bg-teal-800/50 rounded-lg p-1 mb-5 w-max">
             <button onClick={() => setViewMode('total')} className={`px-4 py-1.5 rounded-md text-sm transition-colors ${viewMode === 'total' ? 'bg-white text-teal-700 font-bold shadow-sm' : 'text-teal-100 hover:text-white'}`}>總計支出</button>
@@ -335,11 +404,27 @@ export default function App() {
           </div>
         </section>
 
+        {/* 新增記帳表單 */}
         <section className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-          <h2 className="text-slate-700 font-semibold mb-4 flex items-center gap-2">
-            <Plus size={20} className="text-teal-600"/>
-            新增支出 ({baseCurrency})
-          </h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-slate-700 font-semibold flex items-center gap-2">
+              <Plus size={20} className="text-teal-600"/>
+              新增支出 ({baseCurrency})
+            </h2>
+            <div className="relative bg-teal-50 text-teal-700 rounded-lg flex items-center px-2 py-1.5 border border-teal-100">
+              <Calendar size={14} className="mr-1.5" />
+              <select 
+                value={expenseDay}
+                onChange={(e) => setExpenseDay(parseInt(e.target.value))}
+                className="bg-transparent text-sm font-bold border-none focus:ring-0 cursor-pointer appearance-none outline-none pr-1"
+              >
+                {Array.from({length: tripDays}, (_, i) => i + 1).map(d => (
+                  <option key={d} value={d}>第 {d} 天</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          
           <form onSubmit={handleAddExpense} className="space-y-4">
             <div className="flex gap-2">
               {CATEGORIES.map(cat => {
@@ -356,7 +441,6 @@ export default function App() {
             
             <div className="space-y-3">
               <div className="relative flex items-center">
-                {/* 獨立定位符號區域，確保不會隨數字長度移動 */}
                 <div className="absolute left-0 top-0 bottom-0 flex items-center justify-center w-14 bg-slate-100 border-r border-slate-200 rounded-l-xl z-10">
                   <span className="text-slate-500 font-bold text-lg">{currentSymbol}</span>
                 </div>
@@ -366,7 +450,6 @@ export default function App() {
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="輸入金額..."
-                  // 將左邊的 padding 加大 (pl-16)，空出符號的位置
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-16 pr-4 py-4 focus:ring-2 focus:ring-teal-500 focus:outline-none text-slate-800 text-xl font-bold tracking-wider"
                   required
                 />
@@ -389,6 +472,7 @@ export default function App() {
           </form>
         </section>
 
+        {/* 支出明細列表 */}
         <section>
           <div className="flex justify-between items-end mb-3 px-1">
             <h2 className="text-slate-700 font-semibold flex items-center gap-2">
@@ -411,16 +495,19 @@ export default function App() {
                 
                 return (
                   <div key={item.id} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex items-center justify-between group">
-                    <div className="flex items-center gap-3 overflow-hidden">
+                    <div className="flex items-center gap-3 overflow-hidden cursor-pointer flex-1" onClick={() => handleEditClick(item)}>
                       <div className={`p-3 rounded-full shrink-0 ${catInfo.color}`}>
                         <Icon size={20} />
                       </div>
                       <div className="overflow-hidden">
-                        <p className="font-semibold text-slate-700 truncate">{item.desc}</p>
-                        <div className="flex items-center gap-1">
+                        <p className="font-semibold text-slate-700 truncate hover:text-teal-600 transition-colors flex items-center gap-1.5">
+                          {item.desc} <Edit2 size={12} className="text-slate-300" />
+                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                           <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded font-medium">第 {item.day || 1} 天</span>
                            <span className="text-xs text-slate-400">{catInfo.name}</span>
                            {item.originalCurrency !== baseCurrency && (
-                             <span className="text-[10px] text-slate-400 bg-slate-100 px-1 rounded">
+                             <span className="text-[10px] text-slate-400">
                                (原: {item.originalAmount} {item.originalCurrency})
                              </span>
                            )}
@@ -431,7 +518,7 @@ export default function App() {
                       <span className="font-bold text-slate-700 text-lg">
                         {currentSymbol} {displayAmount.toLocaleString('zh-HK', { maximumFractionDigits: 2 })}
                       </span>
-                      <button onClick={() => handleDelete(item.id)} className="text-slate-300 hover:text-red-500 p-1 transition-colors">
+                      <button onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }} className="text-slate-300 hover:text-red-500 p-1 transition-colors">
                         <Trash2 size={18} />
                       </button>
                     </div>
@@ -443,6 +530,83 @@ export default function App() {
         </section>
       </main>
 
+      {/* === 編輯支出 Modal === */}
+      {editingExpense && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-white w-full sm:w-[400px] rounded-t-2xl sm:rounded-2xl p-6 shadow-xl slide-in-from-bottom-full sm:slide-in-from-bottom-0">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <Edit2 size={20} className="text-teal-600"/> 更改支出紀錄
+              </h2>
+              <button onClick={() => setEditingExpense(null)} className="text-slate-400 hover:text-slate-600 bg-slate-100 rounded-full p-1"><X size={20} /></button>
+            </div>
+            
+            <form onSubmit={handleSaveEdit} className="space-y-4">
+              <div className="flex gap-2">
+                {CATEGORIES.map(cat => {
+                  const Icon = cat.icon;
+                  const isSelected = editingExpense.category === cat.id;
+                  return (
+                    <button key={cat.id} type="button" onClick={() => setEditingExpense({...editingExpense, category: cat.id})} className={`flex-1 flex flex-col items-center justify-center py-2.5 rounded-xl border transition-all ${isSelected ? `${cat.color} ${cat.border} ring-2 ring-offset-1 ring-${cat.color.split('-')[1]}-400` : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'}`}>
+                      <Icon size={20} className="mb-1" />
+                      <span className="text-[10px] font-medium">{cat.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                 <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">天數</label>
+                    <select 
+                      value={editingExpense.day}
+                      onChange={(e) => setEditingExpense({...editingExpense, day: parseInt(e.target.value)})}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 focus:ring-2 focus:ring-teal-500 focus:outline-none text-slate-700"
+                    >
+                      {Array.from({length: tripDays}, (_, i) => i + 1).map(d => (
+                        <option key={d} value={d}>第 {d} 天</option>
+                      ))}
+                    </select>
+                 </div>
+                 <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">原始貨幣</label>
+                    <div className="bg-slate-100 border border-slate-200 rounded-xl px-3 py-3 text-slate-500 font-medium cursor-not-allowed">
+                       {editingExpense.originalCurrency}
+                    </div>
+                 </div>
+              </div>
+
+              <div>
+                 <label className="block text-xs font-medium text-slate-500 mb-1">金額</label>
+                 <input
+                  type="number"
+                  step="any"
+                  value={editingExpense.originalAmount}
+                  onChange={(e) => setEditingExpense({...editingExpense, originalAmount: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-teal-500 focus:outline-none text-slate-800 font-bold"
+                  required
+                 />
+              </div>
+
+              <div>
+                 <label className="block text-xs font-medium text-slate-500 mb-1">描述</label>
+                 <input
+                  type="text"
+                  value={editingExpense.desc}
+                  onChange={(e) => setEditingExpense({...editingExpense, desc: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-teal-500 focus:outline-none text-slate-700"
+                 />
+              </div>
+
+              <button type="submit" className="w-full bg-slate-800 hover:bg-slate-700 text-white font-semibold py-3.5 rounded-xl transition-colors shadow-sm mt-4">
+                儲存更改
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 分享與匯入 Modal */}
       {isShareOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full sm:w-[400px] rounded-t-2xl sm:rounded-2xl p-6 shadow-xl max-h-[90vh] overflow-y-auto slide-in-from-bottom-full sm:slide-in-from-bottom-0">
