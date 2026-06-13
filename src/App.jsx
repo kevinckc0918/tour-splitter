@@ -22,7 +22,6 @@ import {
 } from 'lucide-react';
 
 // 預設匯率 (相對於港幣 HKD，作為內部計算基準)
-// 內部所有計算都先轉回 HKD 再轉成目標貨幣
 const DEFAULT_RATES = {
   HKD: 1,
   USD: 0.128,
@@ -46,28 +45,20 @@ const CATEGORIES = [
   { id: 'others', name: '其他', icon: MoreHorizontal, color: 'bg-gray-100 text-gray-600', border: 'border-gray-200' },
 ];
 
-// LocalStorage 的 Key 名稱
 const STORAGE_KEY = 'trip_splitter_data_v2';
 
 export default function App() {
-  // === 狀態初始化 (從 LocalStorage 讀取) ===
   const [tripName, setTripName] = useState('日本關西五日遊');
   const [tripDays, setTripDays] = useState(5);
   const [peopleCount, setPeopleCount] = useState(4);
   const [splitCount, setSplitCount] = useState(4); 
-  const [viewMode, setViewMode] = useState('total'); // 'total' 或 'daily'
-  
-  // expenses 結構: { id, originalAmount, originalCurrency, desc, category, timestamp }
-  // 注意：我們現在儲存的是「原始輸入時的金額和貨幣」
+  const [viewMode, setViewMode] = useState('total'); 
   const [expenses, setExpenses] = useState([]); 
-  
-  // App 全局主要顯示與輸入的貨幣
   const [baseCurrency, setBaseCurrency] = useState('JPY'); 
   const [targetCurrency, setTargetCurrency] = useState('HKD');
   const [exchangeRates, setExchangeRates] = useState(DEFAULT_RATES);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
 
-  // Modal 與表單狀態 (不需要存檔)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [amount, setAmount] = useState('');
@@ -76,17 +67,12 @@ export default function App() {
   const [importText, setImportText] = useState('');
   const [syncMessage, setSyncMessage] = useState({ type: '', text: '' });
 
-  // === 核心：匯率轉換函數 ===
-  // 將任意貨幣的金額轉換為目標貨幣
   const convertCurrency = (amount, fromCode, toCode) => {
     if (fromCode === toCode) return amount;
-    // 先轉為 HKD (基準)
     const amountInHKD = amount / exchangeRates[fromCode];
-    // 再轉為目標貨幣
     return amountInHKD * exchangeRates[toCode];
   };
 
-  // === 1. 初次載入 ===
   useEffect(() => {
     const loadData = () => {
       try {
@@ -115,7 +101,6 @@ export default function App() {
     loadData();
   }, []);
 
-  // === 2. 自動儲存 ===
   useEffect(() => {
     if (isDataLoaded) {
       const dataToSave = {
@@ -126,7 +111,6 @@ export default function App() {
     }
   }, [isDataLoaded, tripName, tripDays, peopleCount, splitCount, viewMode, expenses, baseCurrency, targetCurrency, exchangeRates]);
 
-  // 清除提示訊息
   useEffect(() => {
     if (syncMessage.text) {
       const timer = setTimeout(() => setSyncMessage({ type: '', text: '' }), 3000);
@@ -141,7 +125,7 @@ export default function App() {
     const newExpense = {
       id: Date.now().toString(),
       originalAmount: parseFloat(amount),
-      originalCurrency: baseCurrency, // 記住這筆帳單是用什麼貨幣輸入的
+      originalCurrency: baseCurrency,
       desc: desc || CATEGORIES.find(c => c.id === category)?.name || '未命名項目',
       category: category,
       timestamp: new Date().toISOString()
@@ -156,10 +140,8 @@ export default function App() {
     setExpenses(expenses.filter(e => e.id !== id));
   };
 
-  // === 3. 計算總計 (將所有帳單轉換為目前的 baseCurrency) ===
   const totalExpenseInBase = useMemo(() => {
     return expenses.reduce((sum, item) => {
-      // 將每筆帳單的原始貨幣，轉換為目前的全局主要貨幣再加總
       const convertedAmount = convertCurrency(item.originalAmount, item.originalCurrency, baseCurrency);
       return sum + convertedAmount;
     }, 0);
@@ -172,7 +154,6 @@ export default function App() {
   const displayTotal = viewMode === 'total' ? totalExpenseInBase : (tripDays > 0 ? totalExpenseInBase / tripDays : 0);
   const displayAverage = viewMode === 'total' ? averageExpenseInBase : (tripDays > 0 ? averageExpenseInBase / tripDays : 0);
 
-  // 產生匯出代碼
   const generateExportCode = () => {
     const payload = {
       version: '2.0',
@@ -243,7 +224,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20">
-      {/* 頂部導航列 */}
       <header className="bg-teal-600 text-white p-4 shadow-md sticky top-0 z-10">
         <div className="max-w-md mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2.5">
@@ -253,7 +233,6 @@ export default function App() {
             <h1 className="text-xl font-bold tracking-wide">旅遊夾錢</h1>
           </div>
           <div className="flex items-center gap-1">
-            {/* 將全局貨幣選擇移到外面 */}
             <div className="relative mr-1 bg-teal-700/50 rounded-full flex items-center px-2 py-1">
               <Globe size={16} className="text-teal-200 mr-1" />
               <select 
@@ -266,7 +245,6 @@ export default function App() {
                 ))}
               </select>
             </div>
-
             <button onClick={() => setIsShareOpen(true)} className="p-2 hover:bg-teal-700 rounded-full transition">
               <Share2 size={20} />
             </button>
@@ -278,8 +256,6 @@ export default function App() {
       </header>
 
       <main className="max-w-md mx-auto p-4 space-y-6">
-        
-        {/* 基本設定卡片 */}
         <section className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
           <div className="mb-5">
             <label className="block text-xs font-medium text-slate-500 mb-1.5">行程名稱</label>
@@ -320,7 +296,6 @@ export default function App() {
           </div>
         </section>
 
-        {/* 總覽與匯率卡片 */}
         <section className="bg-gradient-to-br from-teal-500 to-teal-700 rounded-2xl p-6 shadow-lg text-white relative">
           <div className="flex bg-teal-800/50 rounded-lg p-1 mb-5 w-max">
             <button onClick={() => setViewMode('total')} className={`px-4 py-1.5 rounded-md text-sm transition-colors ${viewMode === 'total' ? 'bg-white text-teal-700 font-bold shadow-sm' : 'text-teal-100 hover:text-white'}`}>總計支出</button>
@@ -360,7 +335,6 @@ export default function App() {
           </div>
         </section>
 
-        {/* 新增記帳表單 */}
         <section className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
           <h2 className="text-slate-700 font-semibold mb-4 flex items-center gap-2">
             <Plus size={20} className="text-teal-600"/>
@@ -380,19 +354,22 @@ export default function App() {
               })}
             </div>
             
-            {/* 加大輸入欄位與字體 */}
             <div className="space-y-3">
-              <div className="relative">
+              <div className="relative flex items-center">
+                {/* 獨立定位符號區域，確保不會隨數字長度移動 */}
+                <div className="absolute left-0 top-0 bottom-0 flex items-center justify-center w-14 bg-slate-100 border-r border-slate-200 rounded-l-xl z-10">
+                  <span className="text-slate-500 font-bold text-lg">{currentSymbol}</span>
+                </div>
                 <input
                   type="number"
                   step="any"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="輸入金額..."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-4 focus:ring-2 focus:ring-teal-500 focus:outline-none text-slate-800 text-xl font-bold tracking-wider"
+                  // 將左邊的 padding 加大 (pl-16)，空出符號的位置
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-16 pr-4 py-4 focus:ring-2 focus:ring-teal-500 focus:outline-none text-slate-800 text-xl font-bold tracking-wider"
                   required
                 />
-                <span className="absolute left-4 top-4 text-slate-500 font-bold text-lg">{currentSymbol}</span>
               </div>
               <div>
                 <input
@@ -412,7 +389,6 @@ export default function App() {
           </form>
         </section>
 
-        {/* 支出明細列表 */}
         <section>
           <div className="flex justify-between items-end mb-3 px-1">
             <h2 className="text-slate-700 font-semibold flex items-center gap-2">
@@ -431,7 +407,6 @@ export default function App() {
               {expenses.map(item => {
                 const catInfo = CATEGORIES.find(c => c.id === item.category) || CATEGORIES[3];
                 const Icon = catInfo.icon;
-                // 將該筆帳單從輸入時的貨幣，轉換為目前顯示的貨幣
                 const displayAmount = convertCurrency(item.originalAmount, item.originalCurrency, baseCurrency);
                 
                 return (
@@ -444,7 +419,6 @@ export default function App() {
                         <p className="font-semibold text-slate-700 truncate">{item.desc}</p>
                         <div className="flex items-center gap-1">
                            <span className="text-xs text-slate-400">{catInfo.name}</span>
-                           {/* 如果這筆帳單是用其他貨幣記的，顯示一下原始金額備註 */}
                            {item.originalCurrency !== baseCurrency && (
                              <span className="text-[10px] text-slate-400 bg-slate-100 px-1 rounded">
                                (原: {item.originalAmount} {item.originalCurrency})
@@ -469,7 +443,6 @@ export default function App() {
         </section>
       </main>
 
-      {/* 分享與匯入 Modal */}
       {isShareOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full sm:w-[400px] rounded-t-2xl sm:rounded-2xl p-6 shadow-xl max-h-[90vh] overflow-y-auto slide-in-from-bottom-full sm:slide-in-from-bottom-0">
@@ -515,7 +488,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 設定 Modal */}
       {isSettingsOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full sm:w-[400px] rounded-t-2xl sm:rounded-2xl p-6 shadow-xl slide-in-from-bottom-full sm:slide-in-from-bottom-0 max-h-[90vh] overflow-y-auto">
