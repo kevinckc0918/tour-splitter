@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Settings, 
   Plus, 
@@ -8,7 +8,6 @@ import {
   Train, 
   ShoppingBag, 
   MoreHorizontal, 
-  Users, 
   MapPin,
   X,
   RefreshCw,
@@ -71,13 +70,12 @@ export default function App() {
   const [amount, setAmount] = useState('');
   const [desc, setDesc] = useState('');
   const [category, setCategory] = useState('dining');
-  const [expenseDay, setExpenseDay] = useState(1); // 新增：第幾天
-  const [editingExpense, setEditingExpense] = useState(null); // 正在編輯的項目
+  const [expenseDay, setExpenseDay] = useState(1);
+  const [editingExpense, setEditingExpense] = useState(null);
 
   const [importText, setImportText] = useState('');
   const [syncMessage, setSyncMessage] = useState({ type: '', text: '' });
 
-  // 確保選擇的天數不會超過總天數
   useEffect(() => {
     if (expenseDay > tripDays) {
       setExpenseDay(tripDays);
@@ -90,11 +88,9 @@ export default function App() {
     return amountInHKD * exchangeRates[toCode];
   };
 
-  // === 1. 初次載入 ===
   useEffect(() => {
     const loadData = () => {
       try {
-        // 嘗試讀取 v3，如果沒有再讀取舊版 v2
         let savedData = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('trip_splitter_data_v2');
         if (savedData) {
           const parsedData = JSON.parse(savedData);
@@ -108,7 +104,6 @@ export default function App() {
           setExchangeRates(prev => ({ ...prev, ...parsedData.exchangeRates }));
           
           if (Array.isArray(parsedData.expenses)) {
-            // 相容舊資料：如果舊資料沒有 day 屬性，預設為第 1 天
             const formattedExpenses = parsedData.expenses.map(ex => ({
               ...ex,
               day: ex.day || 1
@@ -125,7 +120,6 @@ export default function App() {
     loadData();
   }, []);
 
-  // === 2. 自動儲存 ===
   useEffect(() => {
     if (isDataLoaded) {
       const dataToSave = {
@@ -144,7 +138,6 @@ export default function App() {
     }
   }, [syncMessage]);
 
-  // 新增支出
   const handleAddExpense = (e) => {
     e.preventDefault();
     if (!amount || isNaN(amount) || amount <= 0) return;
@@ -164,17 +157,14 @@ export default function App() {
     setDesc('');
   };
 
-  // 刪除支出
   const handleDelete = (id) => {
     setExpenses(expenses.filter(e => e.id !== id));
   };
 
-  // 點擊編輯
   const handleEditClick = (item) => {
     setEditingExpense({ ...item });
   };
 
-  // 儲存編輯
   const handleSaveEdit = (e) => {
     e.preventDefault();
     if (!editingExpense || !editingExpense.originalAmount) return;
@@ -193,7 +183,6 @@ export default function App() {
     setEditingExpense(null);
   };
 
-  // 總計計算
   const totalExpenseInBase = useMemo(() => {
     return expenses.reduce((sum, item) => {
       const convertedAmount = convertCurrency(item.originalAmount, item.originalCurrency, baseCurrency);
@@ -208,7 +197,6 @@ export default function App() {
   const displayTotal = viewMode === 'total' ? totalExpenseInBase : (tripDays > 0 ? totalExpenseInBase / tripDays : 0);
   const displayAverage = viewMode === 'total' ? averageExpenseInBase : (tripDays > 0 ? averageExpenseInBase / tripDays : 0);
 
-  // 匯出 / 匯入
   const generateExportCode = () => {
     const payload = {
       version: '3.0',
@@ -250,7 +238,6 @@ export default function App() {
         setBaseCurrency(data.baseCurrency || 'HKD');
         if (data.exchangeRates) setExchangeRates(data.exchangeRates);
         if (data.expenses && Array.isArray(data.expenses)) {
-            // 處理舊版資料匯入相容
             const formattedExpenses = data.expenses.map(ex => ({
               ...ex,
               day: ex.day || 1
@@ -282,23 +269,25 @@ export default function App() {
   const currentSymbol = CURRENCIES.find(c => c.code === baseCurrency)?.symbol || '$';
   const targetSymbol = CURRENCIES.find(c => c.code === targetCurrency)?.symbol || '$';
 
-  // 自訂數字增減器元件
   const NumberControl = ({ label, value, onChange, min = 1, unit }) => (
     <div>
       <label className="block text-xs font-medium text-slate-500 mb-1.5 text-center">{label}</label>
-      <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl overflow-hidden h-[42px]">
+      <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl overflow-hidden h-14">
         <button 
           onClick={() => onChange(Math.max(min, value - 1))}
-          className="h-full px-3 text-teal-600 hover:bg-teal-50 hover:text-teal-700 transition-colors flex items-center justify-center active:bg-teal-100"
+          className="h-full px-2 sm:px-3 text-teal-600 hover:bg-teal-50 hover:text-teal-700 transition-colors flex items-center justify-center active:bg-teal-100"
         >
           <Minus size={16} strokeWidth={3} />
         </button>
-        <div className="flex-1 text-center font-bold text-slate-700 select-none text-base">
-          {value} <span className="text-xs text-slate-400 font-normal ml-0.5">{unit}</span>
+        
+        <div className="flex-1 flex flex-col items-center justify-center select-none leading-none">
+          <span className="font-bold text-slate-700 text-base mb-0.5">{value}</span>
+          <span className="text-[10px] text-slate-400 font-medium">{unit}</span>
         </div>
+
         <button 
           onClick={() => onChange(value + 1)}
-          className="h-full px-3 text-teal-600 hover:bg-teal-50 hover:text-teal-700 transition-colors flex items-center justify-center active:bg-teal-100"
+          className="h-full px-2 sm:px-3 text-teal-600 hover:bg-teal-50 hover:text-teal-700 transition-colors flex items-center justify-center active:bg-teal-100"
         >
           <Plus size={16} strokeWidth={3} />
         </button>
@@ -341,7 +330,6 @@ export default function App() {
 
       <main className="max-w-md mx-auto p-4 space-y-6">
         
-        {/* 基本設定卡片 */}
         <section className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
           <div className="mb-5">
             <label className="block text-xs font-medium text-slate-500 mb-1.5">行程名稱</label>
@@ -364,7 +352,6 @@ export default function App() {
           </div>
         </section>
 
-        {/* 總覽與匯率卡片 */}
         <section className="bg-gradient-to-br from-teal-500 to-teal-700 rounded-2xl p-6 shadow-lg text-white relative">
           <div className="flex bg-teal-800/50 rounded-lg p-1 mb-5 w-max">
             <button onClick={() => setViewMode('total')} className={`px-4 py-1.5 rounded-md text-sm transition-colors ${viewMode === 'total' ? 'bg-white text-teal-700 font-bold shadow-sm' : 'text-teal-100 hover:text-white'}`}>總計支出</button>
@@ -404,7 +391,6 @@ export default function App() {
           </div>
         </section>
 
-        {/* 新增記帳表單 */}
         <section className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-slate-700 font-semibold flex items-center gap-2">
@@ -472,7 +458,6 @@ export default function App() {
           </form>
         </section>
 
-        {/* 支出明細列表 */}
         <section>
           <div className="flex justify-between items-end mb-3 px-1">
             <h2 className="text-slate-700 font-semibold flex items-center gap-2">
@@ -530,7 +515,6 @@ export default function App() {
         </section>
       </main>
 
-      {/* === 編輯支出 Modal === */}
       {editingExpense && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full sm:w-[400px] rounded-t-2xl sm:rounded-2xl p-6 shadow-xl slide-in-from-bottom-full sm:slide-in-from-bottom-0">
@@ -606,7 +590,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 分享與匯入 Modal */}
       {isShareOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full sm:w-[400px] rounded-t-2xl sm:rounded-2xl p-6 shadow-xl max-h-[90vh] overflow-y-auto slide-in-from-bottom-full sm:slide-in-from-bottom-0">
