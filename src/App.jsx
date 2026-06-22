@@ -20,7 +20,8 @@ import {
   Wallet,
   Globe,
   Edit2,
-  Calendar
+  Calendar,
+  MessageSquare
 } from 'lucide-react';
 
 // 預設匯率 (相對於港幣 HKD)
@@ -197,6 +198,23 @@ export default function App() {
   const displayTotal = viewMode === 'total' ? totalExpenseInBase : (tripDays > 0 ? totalExpenseInBase / tripDays : 0);
   const displayAverage = viewMode === 'total' ? averageExpenseInBase : (tripDays > 0 ? averageExpenseInBase / tripDays : 0);
 
+  // 共用的複製到剪貼簿功能
+  const copyToClipboard = (textToCopy, successMsg, errorMsg) => {
+    const textArea = document.createElement("textarea");
+    textArea.value = textToCopy;
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      setSyncMessage({ type: 'success', text: successMsg });
+    } catch (err) {
+      setSyncMessage({ type: 'error', text: errorMsg });
+    }
+    document.body.removeChild(textArea);
+  };
+
+  // 匯出代碼 (同步用)
   const generateExportCode = () => {
     const payload = {
       version: '3.0',
@@ -206,20 +224,77 @@ export default function App() {
     return btoa(encodeURIComponent(JSON.stringify(payload)));
   };
 
-  const copyToClipboard = () => {
-    const code = generateExportCode();
-    const textArea = document.createElement("textarea");
-    textArea.value = code;
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    try {
-      document.execCommand('copy');
-      setSyncMessage({ type: 'success', text: '行程代碼已複製！請貼給您的旅伴。' });
-    } catch (err) {
-      setSyncMessage({ type: 'error', text: '複製失敗，請手動全選下方代碼複製。' });
+  const handleCopyCode = () => {
+    copyToClipboard(generateExportCode(), '行程代碼已複製！請貼給您的旅伴。', '複製失敗，請手動全選下方代碼複製。');
+  };
+
+  // 生成 WhatsApp 摘要文字
+  const generateSummaryText = () => {
+    const currentSymbol = CURRENCIES.find(c => c.code === baseCurrency)?.symbol || '$';
+    let text = `✈️ 行程：${tripName}\n\n`;
+
+    // 找出最大的天數 (避免有人把天數改小，導致後面的帳單被隱藏)
+    const maxDay = Math.max(tripDays, ...expenses.map(ex => ex.day || 1), 1);
+    
+    // 將支出按天數分組
+    const expensesByDay = {};
+    for (let i = 1; i <= maxDay; i++) {
+      expensesByDay[i] = [];
     }
-    document.body.removeChild(textArea);
+    expenses.forEach(ex => {
+      const day = ex.day || 1;
+      if (expensesByDay[day]) {
+         expensesByDay[day].push(ex);
+      }
+    });
+
+    let grandTotal = 0;
+
+    for (let i = 1; i <= maxDay; i++) {
+      const dayExps = expensesByDay[i];
+      if (dayExps.length === 0) continue; // 如果當天沒花費就跳過顯示
+
+      text += `📅 第 ${i} 天\n`;
+      let dayTotal = 0;
+
+      // 排序：確保順序一致 (可依據 timestamp)
+      dayExps.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)).forEach(ex => {
+        const amount = convertCurrency(ex.originalAmount, ex.originalCurrency, baseCurrency);
+        dayTotal += amount;
+        const catName = CATEGORIES.find(c => c.id === ex.category)?.name || '其他';
+        const formattedAmount = amount.toLocaleString('zh-HK', {minimumFractionDigits: 0, maximumFractionDigits: 2});
+        
+        text += `▪️ ${ex.desc} (${catName}): ${currentSymbol} ${formattedAmount}\n`;
+      });
+
+      grandTotal += dayTotal;
+      const dayAvg = splitCount > 0 ? dayTotal / splitCount : 0;
+      
+      const formattedDayTotal = dayTotal.toLocaleString('zh-HK', {minimumFractionDigits: 0, maximumFractionDigits: 2});
+      const formattedDayAvg = dayAvg.toLocaleString('zh-HK', {minimumFractionDigits: 0, maximumFractionDigits: 2});
+
+      text += `💰 當日總支出: ${currentSymbol} ${formattedDayTotal}\n`;
+      text += `🧍 每份平均: ${currentSymbol} ${formattedDayAvg}\n\n`;
+    }
+
+    if (expenses.length === 0) {
+       text += `目前還沒有任何支出記錄喔！\n\n`;
+    }
+
+    const grandAvg = splitCount > 0 ? grandTotal / splitCount : 0;
+    const formattedGrandTotal = grandTotal.toLocaleString('zh-HK', {minimumFractionDigits: 0, maximumFractionDigits: 2});
+    const formattedGrandAvg = grandAvg.toLocaleString('zh-HK', {minimumFractionDigits: 0, maximumFractionDigits: 2});
+
+    text += `====================\n`;
+    text += `🏆 總結算 (${baseCurrency})\n`;
+    text += `總計支出: ${currentSymbol} ${formattedGrandTotal}\n`;
+    text += `每份總平均 (除 ${splitCount} 份): ${currentSymbol} ${formattedGrandAvg}\n`;
+
+    return text;
+  };
+
+  const handleCopySummary = () => {
+    copyToClipboard(generateSummaryText(), '行程摘要已複製！可直接貼上 WhatsApp。', '複製失敗。');
   };
 
   const handleImport = () => {
@@ -590,6 +665,7 @@ export default function App() {
         </div>
       )}
 
+      {/* 分享與匯入 Modal */}
       {isShareOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full sm:w-[400px] rounded-t-2xl sm:rounded-2xl p-6 shadow-xl max-h-[90vh] overflow-y-auto slide-in-from-bottom-full sm:slide-in-from-bottom-0">
@@ -599,34 +675,61 @@ export default function App() {
               </h2>
               <button onClick={() => setIsShareOpen(false)} className="text-slate-400 hover:text-slate-600 bg-slate-100 rounded-full p-1"><X size={20} /></button>
             </div>
+            
             {syncMessage.text && (
               <div className={`p-3 rounded-xl mb-4 flex items-start gap-2 ${syncMessage.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
                 {syncMessage.type === 'success' ? <CheckCircle2 size={20} className="shrink-0 mt-0.5" /> : <AlertCircle size={20} className="shrink-0 mt-0.5" />}
                 <p className="text-sm">{syncMessage.text}</p>
               </div>
             )}
+            
             <div className="space-y-6">
+              {/* 新增：WhatsApp 摘要分享 */}
+              <div className="bg-green-50 p-4 rounded-xl border border-green-100">
+                <h3 className="font-semibold text-green-800 mb-2 flex items-center gap-2">
+                  <MessageSquare size={18} /> 複製行程摘要 (WhatsApp)
+                </h3>
+                <p className="text-xs text-green-700 mb-3 leading-relaxed">
+                  將會為您生成一份包含「每日明細」、「當日總結」與「每份平均」的純文字報告，方便直接貼給朋友看。
+                </p>
+                <button 
+                  onClick={handleCopySummary} 
+                  className="w-full mt-2 bg-green-600 hover:bg-green-700 text-white font-medium py-2.5 rounded-lg transition-colors flex justify-center items-center gap-2 text-sm"
+                >
+                  <Copy size={16} /> 複製文字摘要
+                </button>
+              </div>
+
+              <div className="relative flex py-2 items-center">
+                <div className="flex-grow border-t border-slate-200"></div>
+                <span className="flex-shrink-0 mx-4 text-slate-400 text-xs">共同記帳功能</span>
+                <div className="flex-grow border-t border-slate-200"></div>
+              </div>
+
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                <h3 className="font-semibold text-slate-700 mb-2 flex items-center gap-2"><Download size={18} className="text-slate-500" /> 匯出給旅伴</h3>
-                <p className="text-xs text-slate-500 mb-3">複製下方的代碼並傳給朋友，他們貼上即可載入目前的帳單。</p>
-                <div className="relative">
-                  <textarea readOnly value={generateExportCode()} className="w-full bg-slate-200/50 text-slate-400 text-xs rounded-lg p-3 h-16 resize-none focus:outline-none break-all" />
-                  <div className="absolute inset-0 bg-gradient-to-b from-transparent to-slate-50/90 pointer-events-none rounded-lg" />
-                </div>
-                <button onClick={copyToClipboard} className="w-full mt-2 bg-teal-600 hover:bg-teal-700 text-white font-medium py-2.5 rounded-lg transition-colors flex justify-center items-center gap-2 text-sm">
+                <h3 className="font-semibold text-slate-700 mb-2 flex items-center gap-2"><Download size={18} className="text-slate-500" /> 匯出代碼給旅伴</h3>
+                <p className="text-xs text-slate-500 mb-3">複製下方的代碼並傳給朋友，他們貼上即可在自己的手機上載入與您相同的帳單。</p>
+                <button 
+                  onClick={handleCopyCode} 
+                  className="w-full mt-2 bg-teal-600 hover:bg-teal-700 text-white font-medium py-2.5 rounded-lg transition-colors flex justify-center items-center gap-2 text-sm"
+                >
                   <Copy size={16} /> 複製行程代碼
                 </button>
               </div>
-              <div className="relative flex py-2 items-center">
-                <div className="flex-grow border-t border-slate-200"></div>
-                <span className="flex-shrink-0 mx-4 text-slate-400 text-xs">或</span>
-                <div className="flex-grow border-t border-slate-200"></div>
-              </div>
+              
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
                 <h3 className="font-semibold text-slate-700 mb-2 flex items-center gap-2"><Download size={18} className="text-slate-500 rotate-180" /> 從旅伴匯入</h3>
                 <p className="text-xs text-slate-500 mb-3 text-red-500/80">注意：匯入將會覆蓋您目前的帳單與設定！</p>
-                <textarea value={importText} onChange={(e) => setImportText(e.target.value)} placeholder="在此貼上朋友傳給您的行程代碼..." className="w-full bg-white border border-slate-200 text-slate-700 text-sm rounded-lg p-3 h-24 resize-none focus:ring-2 focus:ring-teal-500 focus:outline-none mb-2" />
-                <button onClick={handleImport} className="w-full bg-slate-800 hover:bg-slate-700 text-white font-medium py-2.5 rounded-lg transition-colors text-sm">
+                <textarea 
+                  value={importText} 
+                  onChange={(e) => setImportText(e.target.value)} 
+                  placeholder="在此貼上朋友傳給您的行程代碼..." 
+                  className="w-full bg-white border border-slate-200 text-slate-700 text-sm rounded-lg p-3 h-24 resize-none focus:ring-2 focus:ring-teal-500 focus:outline-none mb-2" 
+                />
+                <button 
+                  onClick={handleImport} 
+                  className="w-full bg-slate-800 hover:bg-slate-700 text-white font-medium py-2.5 rounded-lg transition-colors text-sm"
+                >
                   覆蓋並匯入資料
                 </button>
               </div>
@@ -635,6 +738,7 @@ export default function App() {
         </div>
       )}
 
+      {/* 設定 Modal */}
       {isSettingsOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full sm:w-[400px] rounded-t-2xl sm:rounded-2xl p-6 shadow-xl slide-in-from-bottom-full sm:slide-in-from-bottom-0 max-h-[90vh] overflow-y-auto">
